@@ -37,6 +37,9 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
   const [periodicidade, setPeriodicidade] = useState<Periodicidade>("mensal");
   const [numParcelas, setNumParcelas] = useState<number>(4);
   const [valorParcela, setValorParcela] = useState<string>("0,00");
+  // Crédito-specific
+  const [creditoModalidade, setCreditoModalidade] = useState<"avista" | "parcelado">("avista");
+  const [valorTotalCredito, setValorTotalCredito] = useState<string>("0,00");
   const [dataInicio, setDataInicio] = useState<string>(todayISO());
   const [observacoes, setObservacoes] = useState("");
   const [erro, setErro] = useState<string | null>(null);
@@ -51,25 +54,41 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
       setPeriodicidade("mensal");
       setNumParcelas(4);
       setValorParcela("0,00");
+      setCreditoModalidade("avista");
+      setValorTotalCredito("0,00");
       setDataInicio(todayISO());
       setObservacoes("");
       setErro(null);
     }
   }, [open]);
 
-  const valorCentavos = brlInputToCents(valorParcela);
-  const totalParcelas = tipoCobranca === "avista" ? 1 : numParcelas;
+  const isCredito = formaPagamento === "credito";
+
+  // Valores efetivos para preview e submit
+  const valorParcelaCentavos = brlInputToCents(valorParcela);
+  const valorTotalCreditoCentavos = brlInputToCents(valorTotalCredito);
+  const creditoNumParcelas = creditoModalidade === "parcelado" ? numParcelas : 1;
+
+  const efetivTipoCobranca: TipoCobranca = isCredito
+    ? (creditoModalidade === "parcelado" ? "recorrente" : "avista")
+    : tipoCobranca;
+  const efetivNumParcelas = isCredito
+    ? creditoNumParcelas
+    : (tipoCobranca === "avista" ? 1 : numParcelas);
+  const efetivValorCentavos = isCredito
+    ? (creditoNumParcelas > 0 ? Math.round(valorTotalCreditoCentavos / creditoNumParcelas) : 0)
+    : valorParcelaCentavos;
 
   const preview = useMemo(() => {
-    if (!dataInicio || valorCentavos <= 0) return [];
+    if (!dataInicio || efetivValorCentavos <= 0) return [];
     return previewInstallments({
-      tipo_cobranca: tipoCobranca,
-      periodicidade: tipoCobranca === "recorrente" ? periodicidade : null,
-      num_parcelas: totalParcelas,
-      valor_parcela_centavos: valorCentavos,
+      tipo_cobranca: efetivTipoCobranca,
+      periodicidade: efetivTipoCobranca === "recorrente" ? periodicidade : null,
+      num_parcelas: efetivNumParcelas,
+      valor_parcela_centavos: efetivValorCentavos,
       data_inicio: dataInicio,
     });
-  }, [tipoCobranca, periodicidade, totalParcelas, valorCentavos, dataInicio]);
+  }, [efetivTipoCobranca, periodicidade, efetivNumParcelas, efetivValorCentavos, dataInicio]);
 
   const total = preview.reduce((acc, p) => acc + p.valor_centavos, 0);
 
@@ -79,13 +98,24 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
       setErro("Descreva o procedimento");
       return;
     }
-    if (valorCentavos <= 0) {
-      setErro("Informe o valor da parcela");
-      return;
-    }
-    if (tipoCobranca === "recorrente" && (numParcelas < 1 || numParcelas > 120)) {
-      setErro("Número de parcelas inválido (1 a 120)");
-      return;
+    if (isCredito) {
+      if (valorTotalCreditoCentavos <= 0) {
+        setErro("Informe o valor total");
+        return;
+      }
+      if (creditoModalidade === "parcelado" && (numParcelas < 2 || numParcelas > 120)) {
+        setErro("Número de parcelas inválido (2 a 120)");
+        return;
+      }
+    } else {
+      if (valorParcelaCentavos <= 0) {
+        setErro("Informe o valor da parcela");
+        return;
+      }
+      if (tipoCobranca === "recorrente" && (numParcelas < 1 || numParcelas > 120)) {
+        setErro("Número de parcelas inválido (1 a 120)");
+        return;
+      }
     }
     if (!dataInicio) {
       setErro("Informe a data de início");
@@ -99,10 +129,10 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
         profissional_id: profissionalId || null,
         procedimento: procedimento.trim(),
         forma_pagamento: formaPagamento,
-        tipo_cobranca: tipoCobranca,
-        periodicidade: tipoCobranca === "recorrente" ? periodicidade : null,
-        num_parcelas: totalParcelas,
-        valor_parcela_centavos: valorCentavos,
+        tipo_cobranca: efetivTipoCobranca,
+        periodicidade: efetivTipoCobranca === "recorrente" ? periodicidade : null,
+        num_parcelas: efetivNumParcelas,
+        valor_parcela_centavos: efetivValorCentavos,
         data_inicio: dataInicio,
         observacoes: observacoes.trim() || undefined,
       });
@@ -166,67 +196,141 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="tipo">Tipo de cobrança *</Label>
-              <Select
-                id="tipo"
-                value={tipoCobranca}
-                onChange={(e) => setTipoCobranca(e.target.value as TipoCobranca)}
-              >
-                <option value="avista">À vista</option>
-                <option value="recorrente">Recorrente</option>
-              </Select>
-            </div>
-            {tipoCobranca === "recorrente" && (
-              <div className="space-y-1.5">
-                <Label htmlFor="periodicidade">Periodicidade *</Label>
-                <Select
-                  id="periodicidade"
-                  value={periodicidade}
-                  onChange={(e) => setPeriodicidade(e.target.value as Periodicidade)}
-                >
-                  <option value="semanal">Semanal</option>
-                  <option value="mensal">Mensal</option>
-                </Select>
+          {isCredito ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="credito-modalidade">Modalidade *</Label>
+                  <Select
+                    id="credito-modalidade"
+                    value={creditoModalidade}
+                    onChange={(e) => setCreditoModalidade(e.target.value as "avista" | "parcelado")}
+                  >
+                    <option value="avista">À vista</option>
+                    <option value="parcelado">Parcelado</option>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="valor-total">Valor total *</Label>
+                  <Input
+                    id="valor-total"
+                    value={valorTotalCredito}
+                    onChange={(e) => setValorTotalCredito(e.target.value)}
+                    placeholder="0,00"
+                  />
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="parcelas">
-                {tipoCobranca === "avista" ? "Parcelas" : "Nº parcelas *"}
-              </Label>
-              <Input
-                id="parcelas"
-                type="number"
-                min={1}
-                max={120}
-                value={tipoCobranca === "avista" ? 1 : numParcelas}
-                disabled={tipoCobranca === "avista"}
-                onChange={(e) => setNumParcelas(Number(e.target.value) || 1)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="valor">Valor por parcela *</Label>
-              <Input
-                id="valor"
-                value={valorParcela}
-                onChange={(e) => setValorParcela(e.target.value)}
-                placeholder="0,00"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="data">Data de início *</Label>
-              <Input
-                id="data"
-                type="date"
-                value={dataInicio}
-                onChange={(e) => setDataInicio(e.target.value)}
-              />
-            </div>
-          </div>
+              {creditoModalidade === "parcelado" ? (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="parcelas-credito">N° parcelas *</Label>
+                    <Input
+                      id="parcelas-credito"
+                      type="number"
+                      min={2}
+                      max={120}
+                      value={numParcelas}
+                      onChange={(e) => setNumParcelas(Number(e.target.value) || 2)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Valor por parcela</Label>
+                    <Input
+                      value={efetivValorCentavos > 0 ? centsToBRL(efetivValorCentavos) : "0,00"}
+                      readOnly
+                      className="bg-muted text-muted-foreground"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="data">Data 1ª parcela *</Label>
+                    <Input
+                      id="data"
+                      type="date"
+                      value={dataInicio}
+                      onChange={(e) => setDataInicio(e.target.value)}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="data">Data de pagamento *</Label>
+                    <Input
+                      id="data"
+                      type="date"
+                      value={dataInicio}
+                      onChange={(e) => setDataInicio(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="tipo">Tipo de cobrança *</Label>
+                  <Select
+                    id="tipo"
+                    value={tipoCobranca}
+                    onChange={(e) => setTipoCobranca(e.target.value as TipoCobranca)}
+                  >
+                    <option value="avista">À vista</option>
+                    <option value="recorrente">Recorrente</option>
+                  </Select>
+                </div>
+                {tipoCobranca === "recorrente" && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="periodicidade">Periodicidade *</Label>
+                    <Select
+                      id="periodicidade"
+                      value={periodicidade}
+                      onChange={(e) => setPeriodicidade(e.target.value as Periodicidade)}
+                    >
+                      <option value="semanal">Semanal</option>
+                      <option value="mensal">Mensal</option>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="parcelas">
+                    {tipoCobranca === "avista" ? "Parcelas" : "Nº parcelas *"}
+                  </Label>
+                  <Input
+                    id="parcelas"
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={tipoCobranca === "avista" ? 1 : numParcelas}
+                    disabled={tipoCobranca === "avista"}
+                    onChange={(e) => setNumParcelas(Number(e.target.value) || 1)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="valor">Valor por parcela *</Label>
+                  <Input
+                    id="valor"
+                    value={valorParcela}
+                    onChange={(e) => setValorParcela(e.target.value)}
+                    placeholder="0,00"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="data">Data de início *</Label>
+                  <Input
+                    id="data"
+                    type="date"
+                    value={dataInicio}
+                    onChange={(e) => setDataInicio(e.target.value)}
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="obs">Observações</Label>

@@ -158,6 +158,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           p_periodicidade: input.periodicidade ?? null,
           p_num_parcelas: input.num_parcelas,
           p_valor_parcela_centavos: input.valor_parcela_centavos,
+          p_entrada_centavos: input.entrada_centavos ?? 0,
           p_data_inicio: input.data_inicio,
           p_observacoes: input.observacoes ?? null,
         }

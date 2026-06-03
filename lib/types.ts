@@ -35,6 +35,7 @@ export type Treatment = {
   periodicidade: Periodicidade | null;
   num_parcelas: number;
   valor_parcela_centavos: number;
+  entrada_centavos: number;
   data_inicio: string; // ISO date (YYYY-MM-DD)
   status: TreatmentStatus;
   observacoes?: string;

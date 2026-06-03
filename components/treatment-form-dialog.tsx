@@ -19,6 +19,8 @@ import { previewInstallments } from "@/lib/installments";
 import { brlInputToCents, centsToBRL } from "@/lib/money";
 import { formatDateBR } from "@/lib/date";
 import type { FormaPagamento, Periodicidade, TipoCobranca } from "@/lib/types";
+
+type PixModalidade = "avista" | "parcelado" | "entrada_parcelado";
 import { ROLE_LABEL } from "@/lib/permissions";
 
 type Props = {
@@ -40,6 +42,9 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
   // Crédito-specific
   const [creditoModalidade, setCreditoModalidade] = useState<"avista" | "parcelado">("avista");
   const [valorTotalCredito, setValorTotalCredito] = useState<string>("0,00");
+  // PIX-specific
+  const [pixModalidade, setPixModalidade] = useState<PixModalidade>("avista");
+  const [valorEntrada, setValorEntrada] = useState<string>("0,00");
   const [dataInicio, setDataInicio] = useState<string>(todayISO());
   const [observacoes, setObservacoes] = useState("");
   const [erro, setErro] = useState<string | null>(null);
@@ -56,6 +61,8 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
       setValorParcela("0,00");
       setCreditoModalidade("avista");
       setValorTotalCredito("0,00");
+      setPixModalidade("avista");
+      setValorEntrada("0,00");
       setDataInicio(todayISO());
       setObservacoes("");
       setErro(null);
@@ -63,21 +70,30 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
   }, [open]);
 
   const isCredito = formaPagamento === "credito";
+  const isPix = formaPagamento === "pix";
 
   // Valores efetivos para preview e submit
   const valorParcelaCentavos = brlInputToCents(valorParcela);
+  const valorEntradaCentavos = brlInputToCents(valorEntrada);
   const valorTotalCreditoCentavos = brlInputToCents(valorTotalCredito);
   const creditoNumParcelas = creditoModalidade === "parcelado" ? numParcelas : 1;
 
   const efetivTipoCobranca: TipoCobranca = isCredito
     ? (creditoModalidade === "parcelado" ? "recorrente" : "avista")
-    : tipoCobranca;
+    : isPix
+      ? (pixModalidade === "avista" ? "avista" : "recorrente")
+      : tipoCobranca;
   const efetivNumParcelas = isCredito
     ? creditoNumParcelas
-    : (tipoCobranca === "avista" ? 1 : numParcelas);
+    : isPix
+      ? (pixModalidade === "avista" ? 1 : numParcelas)
+      : (tipoCobranca === "avista" ? 1 : numParcelas);
   const efetivValorCentavos = isCredito
     ? (creditoNumParcelas > 0 ? Math.round(valorTotalCreditoCentavos / creditoNumParcelas) : 0)
     : valorParcelaCentavos;
+  const efetivEntradaCentavos = isPix && pixModalidade === "entrada_parcelado"
+    ? valorEntradaCentavos
+    : 0;
 
   const preview = useMemo(() => {
     if (!dataInicio || efetivValorCentavos <= 0) return [];
@@ -87,8 +103,9 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
       num_parcelas: efetivNumParcelas,
       valor_parcela_centavos: efetivValorCentavos,
       data_inicio: dataInicio,
+      entrada_centavos: efetivEntradaCentavos,
     });
-  }, [efetivTipoCobranca, periodicidade, efetivNumParcelas, efetivValorCentavos, dataInicio]);
+  }, [efetivTipoCobranca, periodicidade, efetivNumParcelas, efetivValorCentavos, dataInicio, efetivEntradaCentavos]);
 
   const total = preview.reduce((acc, p) => acc + p.valor_centavos, 0);
 
@@ -112,7 +129,8 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
         setErro("Informe o valor da parcela");
         return;
       }
-      if (tipoCobranca === "recorrente" && (numParcelas < 1 || numParcelas > 120)) {
+      const needsParcelas = isPix ? pixModalidade !== "avista" : tipoCobranca === "recorrente";
+      if (needsParcelas && (numParcelas < 1 || numParcelas > 120)) {
         setErro("Número de parcelas inválido (1 a 120)");
         return;
       }
@@ -133,6 +151,7 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
         periodicidade: efetivTipoCobranca === "recorrente" ? periodicidade : null,
         num_parcelas: efetivNumParcelas,
         valor_parcela_centavos: efetivValorCentavos,
+        entrada_centavos: efetivEntradaCentavos,
         data_inicio: dataInicio,
         observacoes: observacoes.trim() || undefined,
       });
@@ -266,6 +285,140 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
                 </div>
               )}
             </>
+          ) : isPix ? (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="pix-modalidade">Modalidade *</Label>
+                  <Select
+                    id="pix-modalidade"
+                    value={pixModalidade}
+                    onChange={(e) => setPixModalidade(e.target.value as PixModalidade)}
+                  >
+                    <option value="avista">À vista</option>
+                    <option value="parcelado">Parcelado</option>
+                    <option value="entrada_parcelado">Entrada + Parcelado</option>
+                  </Select>
+                </div>
+                {pixModalidade !== "avista" && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="periodicidade-pix">Periodicidade *</Label>
+                    <Select
+                      id="periodicidade-pix"
+                      value={periodicidade}
+                      onChange={(e) => setPeriodicidade(e.target.value as Periodicidade)}
+                    >
+                      <option value="semanal">Semanal</option>
+                      <option value="mensal">Mensal</option>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {pixModalidade === "avista" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="valor">Valor *</Label>
+                    <Input
+                      id="valor"
+                      value={valorParcela}
+                      onChange={(e) => setValorParcela(e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="data">Data de pagamento *</Label>
+                    <Input
+                      id="data"
+                      type="date"
+                      value={dataInicio}
+                      onChange={(e) => setDataInicio(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {pixModalidade === "parcelado" && (
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="parcelas">Nº parcelas *</Label>
+                    <Input
+                      id="parcelas"
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={numParcelas}
+                      onChange={(e) => setNumParcelas(Number(e.target.value) || 1)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="valor">Valor por parcela *</Label>
+                    <Input
+                      id="valor"
+                      value={valorParcela}
+                      onChange={(e) => setValorParcela(e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="data">Data de início *</Label>
+                    <Input
+                      id="data"
+                      type="date"
+                      value={dataInicio}
+                      onChange={(e) => setDataInicio(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {pixModalidade === "entrada_parcelado" && (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="parcelas">Nº parcelas *</Label>
+                      <Input
+                        id="parcelas"
+                        type="number"
+                        min={1}
+                        max={120}
+                        value={numParcelas}
+                        onChange={(e) => setNumParcelas(Number(e.target.value) || 1)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="valor-entrada">Valor da entrada</Label>
+                      <Input
+                        id="valor-entrada"
+                        value={valorEntrada}
+                        onChange={(e) => setValorEntrada(e.target.value)}
+                        placeholder="0,00"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="valor-parcela">Valor por parcela *</Label>
+                      <Input
+                        id="valor-parcela"
+                        value={valorParcela}
+                        onChange={(e) => setValorParcela(e.target.value)}
+                        placeholder="0,00"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="data">Data de início *</Label>
+                      <Input
+                        id="data"
+                        type="date"
+                        value={dataInicio}
+                        onChange={(e) => setDataInicio(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3">
@@ -361,15 +514,22 @@ export function TreatmentFormDialog({ open, onOpenChange, patientId }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.map((p) => (
-                      <tr key={p.numero_parcela} className="border-t">
-                        <td className="py-1.5">{p.numero_parcela}</td>
-                        <td className="py-1.5">{formatDateBR(p.data_vencimento)}</td>
-                        <td className="py-1.5 text-right font-medium">
-                          {centsToBRL(p.valor_centavos)}
-                        </td>
-                      </tr>
-                    ))}
+                    {(() => {
+                      const hasEntradaRow = preview[0]?.is_entrada ?? false;
+                      return preview.map((p) => (
+                        <tr key={p.numero_parcela} className="border-t">
+                          <td className="py-1.5">
+                            {p.is_entrada
+                              ? <span className="text-xs font-semibold text-primary">Entrada</span>
+                              : hasEntradaRow ? p.numero_parcela - 1 : p.numero_parcela}
+                          </td>
+                          <td className="py-1.5">{formatDateBR(p.data_vencimento)}</td>
+                          <td className="py-1.5 text-right font-medium">
+                            {centsToBRL(p.valor_centavos)}
+                          </td>
+                        </tr>
+                      ));
+                    })()}
                   </tbody>
                 </table>
               </div>

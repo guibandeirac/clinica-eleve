@@ -5,6 +5,7 @@ export type InstallmentPreview = {
   numero_parcela: number;
   data_vencimento: string;
   valor_centavos: number;
+  is_entrada?: boolean;
 };
 
 export function previewInstallments(input: {
@@ -13,26 +14,43 @@ export function previewInstallments(input: {
   num_parcelas: number;
   valor_parcela_centavos: number;
   data_inicio: string;
+  entrada_centavos?: number;
 }): InstallmentPreview[] {
-  const { tipo_cobranca, periodicidade, num_parcelas, valor_parcela_centavos, data_inicio } = input;
+  const { tipo_cobranca, periodicidade, num_parcelas, valor_parcela_centavos, data_inicio, entrada_centavos = 0 } = input;
+  const hasEntrada = entrada_centavos > 0;
   const total = tipo_cobranca === "avista" ? 1 : Math.max(1, num_parcelas);
+  const previews: InstallmentPreview[] = [];
 
-  return Array.from({ length: total }, (_, i) => {
-    const numero = i + 1;
+  if (hasEntrada) {
+    previews.push({
+      numero_parcela: 1,
+      data_vencimento: data_inicio,
+      valor_centavos: entrada_centavos,
+      is_entrada: true,
+    });
+  }
+
+  for (let i = 0; i < total; i++) {
+    const numero = i + 1 + (hasEntrada ? 1 : 0);
     let data = data_inicio;
-    if (tipo_cobranca === "recorrente" && i > 0) {
-      if (periodicidade === "semanal") {
-        data = addDaysISO(data_inicio, i * 7);
-      } else if (periodicidade === "mensal") {
-        data = addMonthsISO(data_inicio, i);
+    if (tipo_cobranca === "recorrente") {
+      const shift = hasEntrada ? i + 1 : i;
+      if (shift > 0) {
+        if (periodicidade === "semanal") {
+          data = addDaysISO(data_inicio, shift * 7);
+        } else if (periodicidade === "mensal") {
+          data = addMonthsISO(data_inicio, shift);
+        }
       }
     }
-    return {
+    previews.push({
       numero_parcela: numero,
       data_vencimento: data,
       valor_centavos: valor_parcela_centavos,
-    };
-  });
+    });
+  }
+
+  return previews;
 }
 
 export function buildCharges(treatmentId: string, previews: InstallmentPreview[], forma_pagamento: Treatment["forma_pagamento"]): Charge[] {
